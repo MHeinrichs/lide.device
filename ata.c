@@ -25,6 +25,8 @@
 static BYTE write_taskfile_lba(struct IDEUnit *unit, UBYTE command, ULONG lba, UBYTE sectorCount);
 static BYTE write_taskfile_lba48(struct IDEUnit *unit, UBYTE command, ULONG lba, UBYTE sectorCount);
 static BYTE write_taskfile_chs(struct IDEUnit *unit, UBYTE command, ULONG lba, UBYTE sectorCount);
+static BYTE ata_parse_pio_mode(UWORD *ident);
+struct IDEUnit* ata_find_sibling(struct IDEUnit *unit);
 
 /**
  * ata_status_reg_delay
@@ -260,6 +262,8 @@ bool ata_init_unit(struct IDEUnit *unit) {
     unit->blockSize       = 0;
     unit->present         = false;
     unit->mediumPresent   = false;
+    unit->pio_mode        = 0;
+    unit->pio_max         = 0;
 
     ata_set_xfer(unit,unit->xferMethod);
 
@@ -293,15 +297,19 @@ bool ata_init_unit(struct IDEUnit *unit) {
     if (ata_identify(unit,buf) == true) {
         Info("INIT: ATA Drive found!\n");
 
-        unit->lba             = ((*((UWORD *)buf + ata_identify_capabilities) & ata_capability_lba) != 0);
-        unit->cylinders       = *((UWORD *)buf + ata_identify_cylinders);
-        unit->heads           = *((UWORD *)buf + ata_identify_heads);
-        unit->sectorsPerTrack = *((UWORD *)buf + ata_identify_sectors);
+        unit->lba             = ((buf[ata_identify_capabilities] & ata_capability_lba) != 0);
+        unit->cylinders       = buf[ata_identify_cylinders];
+        unit->heads           = buf[ata_identify_heads];
+        unit->sectorsPerTrack = buf[ata_identify_sectors];
         unit->blockSize       = 512;
-        unit->logicalSectors  = *((UWORD *)buf + ata_identify_logical_sectors+1) << 16 | *((UWORD *)buf + ata_identify_logical_sectors);
+        unit->logicalSectors  = buf[ata_identify_logical_sectors] << 16 | buf[ata_identify_logical_sectors];
         unit->blockShift      = 0;
         unit->mediumPresent   = true;
-        unit->multipleCount   = (*((UWORD *)buf + ata_identify_multiple) & 0xFF);
+        unit->multipleCount   = (buf[ata_identify_multiple] & 0xFF);
+
+        unit->pio_max = ata_parse_pio_mode(buf);
+
+        Trace("INIT: Unit %ld Max PIO mode: %ld\n",unit->unitNum, unit->pio_max);
 
         if (unit->multipleCount > 0 && (ata_set_multiple(unit,unit->multipleCount) == 0)) {
             unit->xferMultiple = true;
@@ -311,7 +319,7 @@ bool ata_init_unit(struct IDEUnit *unit) {
         }
 
         // Support LBA-48 but only up to 2TB
-        if (((*((UWORD *)buf + ata_identify_features) & ata_feature_lba48) != 0) && unit->logicalSectors >= 0xFFFFFFF) {
+        if (((buf[ata_identify_features] & ata_feature_lba48) != 0) && unit->logicalSectors >= 0xFFFFFFF) {
             if (*((UWORD *)buf + ata_identify_lba48_sectors + 2) > 0 ||
                 *((UWORD *)buf + ata_identify_lba48_sectors + 3) > 0) {
                 Info("INIT: Rejecting drive larger than 2TB\n");
@@ -359,7 +367,7 @@ bool ata_init_unit(struct IDEUnit *unit) {
     } else if (atapi_check_signature(unit)) { // Check for ATAPI Signature
         if (atapi_identify(unit,buf) && (buf[0] & 0xC000) == 0x8000) {
             Info("INIT: ATAPI Drive found!\n");
-
+                unit->pio_max         = ata_parse_pio_mode(buf);
                 unit->deviceType      = (buf[0] >> 8) & 0x1F;
                 unit->atapi           = true;
         } else {
@@ -737,4 +745,119 @@ static BYTE write_taskfile_lba48(struct IDEUnit *unit, UBYTE command, ULONG lba,
     *unit->drive->status_command = command;
 
     return 0;
+}
+
+/**
+ * ata_parse_pio_mode
+ * 
+ * Get the PIO mode from the IDENTIFY DEVICE / IDENTIFY PACKET DEVICE data
+ * 
+ * @param ident UWORD Pointer to the ident data
+ * @returns PIO mode (0-4)
+*/
+static BYTE ata_parse_pio_mode(UWORD *ident) {
+    BYTE pio_max = 0;
+
+    // ATA IDENT word 64 valid?
+    if (ident[ata_identify_field_validity] & 0x02) {
+        if (ident[ata_identify_pio_modes] & 0x02) {
+            pio_max = 4;
+        } else if (ident[ata_identify_pio_modes] & 0x01) {
+            pio_max = 3;
+        } else {
+            pio_max = 0;
+        }
+    // Ancient drive, PIO mode in word 51
+    } else {
+        pio_max = ((ident[ata_identify_pio_mode] >> 8) & 0xFF);
+        // Check that the PIO mode reported is valid
+        if (pio_max > 4)
+            pio_max = 0;
+    }
+
+    return pio_max;
+}
+
+/**
+ * ata_set_pio_mode
+ * 
+ * Issues a SET FEATURES to configure the PIO mode of the drive
+ * If this succeeds then unit->board_set_pio will be called to configure the board registers (if defined)
+ * 
+ * @param unit Pointer to an IDEUnit struct
+ * @param mode PIO Mode (0-4)
+ * @returns non-zero on error
+*/
+BYTE ata_set_pio_mode(struct IDEUnit *unit, UBYTE mode) {
+    Trace("ATA: Set PIO mode: %ld\n",mode);
+    UBYTE drvSel = (unit->primary) ? 0xE0 : 0xF0;
+    
+    if (mode > 4 || mode > unit->pio_max) return IOERR_ABORTED;
+
+    mode &= 7; // PIO mode encoded into lowest 3 bits
+    mode |= 8; // PIO flow control transfer mode
+
+    ata_select(unit,drvSel,true); // Select the drive and wait for BSY = 0;
+
+    if (!ata_wait_ready(unit,ATA_RDY_WAIT_COUNT))
+        return IOERR_UNITBUSY;
+    
+    *unit->drive->error_features = ATA_FEATURE_TRANSFERMODE;
+    *unit->drive->sectorCount    = mode;
+    *unit->drive->status_command = ATA_CMD_SET_FEATURES;
+
+    if (!ata_wait_not_busy(unit,ATA_BSY_WAIT_COUNT))
+        return IOERR_UNITBUSY;
+    
+    if (ata_check_error(unit)) {
+        Warn("ATA: Set PIO mode Status: Error\n");
+        // Save error information
+        ata_save_error(unit);
+        return TDERR_NotSpecified;
+    }
+
+    // Configure the PIO timing of the controller
+    if (unit->board_set_pio != NULL)
+        unit->board_set_pio(unit);
+
+    unit->pio_mode = (mode & 0x07);
+
+    return 0;
+
+}
+
+/**
+ * ata_find_sibling
+ * 
+ * Searches the unit list for another drive on the same channel
+ * This may be useful when configuring the PIO mode for a device
+ * if the board timing effects the whole channel
+ * i.e if the Master supports PIO 4 but the Slave can only do PIO 2
+ * Then we can find the lowest common PIO mode
+ * 
+ * @param unit Pointer to an IDEUnit struct
+ * @returns Returns a pointer to the sibling device or NULL if none found
+*/
+struct IDEUnit* ata_find_sibling(struct IDEUnit *unit) {
+    struct IDEUnit *entry;
+
+    if (SysBase->SoftVer >= 36) {
+        ObtainSemaphoreShared(&unit->itask->dev->ulSem);
+    } else {
+        ObtainSemaphore(&unit->itask->dev->ulSem);
+    }
+
+    for (entry = (struct IDEUnit *)unit->itask->dev->units.mlh_Head;
+         entry->mn_Node.mln_Succ != NULL;
+         entry = (struct IDEUnit *)unit->mn_Node.mln_Succ) {
+            if (entry != unit &&
+                entry->itask == unit->itask &&
+                entry->channel == unit->channel) {
+                    return entry;
+                }
+         }
+
+    ReleaseSemaphore(&unit->itask->dev->ulSem);
+
+    return NULL;
 }

@@ -50,6 +50,7 @@
 #define ATA_CMD_WRITE_MULTIPLE     0xC5
 #define ATA_CMD_WRITE_MULTIPLE_EXT 0x39
 #define ATA_CMD_SET_MULTIPLE       0xC6
+#define ATA_CMD_SET_FEATURES       0xEF
 
 // Identify data word offsets
 #define ata_identify_cylinders       1
@@ -60,6 +61,8 @@
 #define ata_identify_model           27
 #define ata_identify_multiple        47
 #define ata_identify_capabilities    49
+#define ata_identify_pio_mode        51
+#define ata_identify_field_validity  53
 #define ata_identify_logical_sectors 60
 #define ata_identify_pio_modes       64
 #define ata_identify_features        83
@@ -69,6 +72,8 @@
 #define ata_capability_lba (1<<9)
 #define ata_capability_dma (1<<8)
 #define ata_feature_lba48  (1<<10)
+
+#define ATA_FEATURE_TRANSFERMODE 0x03
 
 enum xfer_dir {
     READ,
@@ -96,6 +101,7 @@ void ata_set_xfer(struct IDEUnit *unit, enum xfer method);
 
 BYTE ata_read(void *buffer, ULONG lba, ULONG count, ULONG *actual, struct IDEUnit *unit);
 BYTE ata_write(void *buffer, ULONG lba, ULONG count, ULONG *actual, struct IDEUnit *unit);
+BYTE ata_set_pio_mode(struct IDEUnit *unit, UBYTE mode);
 
 void ata_read_unaligned_long(void *source, void *destination);
 void ata_write_unaligned_long(void *source, void *destination);

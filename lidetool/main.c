@@ -28,6 +28,7 @@
 #include "config.h"
 
 #define CMD_XFER 0x1001
+#define CMD_SET_PIOMODE (CMD_XFER + 1)
 
 struct ExecBase *SysBase;
 struct Config *config;
@@ -45,13 +46,26 @@ int main(int argc, char *argv[])
     if (mp = CreateMsgPort()) {
       if (req = CreateIORequest(mp,sizeof(struct IOStdReq))) {
         if ((error = OpenDevice("lide.device",config->Unit,(struct IORequest *)req,0)) == 0) {
-          req->io_Length  = config->Mode;
-          req->io_Command = CMD_XFER;
-          error = DoIO((struct IORequest *)req);
-          if (error == 0) {
-            printf("Transfer mode configured for unit %d\n",config->Unit);
-          } else {
-            printf("IO Error %d\n", error);
+          if (config->SetMode) {
+            req->io_Length  = config->Mode;
+            req->io_Command = CMD_XFER;
+            error = DoIO((struct IORequest *)req);
+            if (error == 0) {
+              printf("Transfer mode configured for unit %d\n",config->Unit);
+            } else {
+              printf("IO Error %d\n", error);
+            }
+          }
+
+          if (config->SetPIO) {
+            req->io_Length = config->PIO;
+            req->io_Command = CMD_SET_PIOMODE;
+            error = DoIO((struct IORequest *)req);
+            if (error == 0) {
+              printf("PIO mode configured for unit %d\n",config->Unit);
+            } else {
+              printf("IO Error %d\n", error);
+            }
           }
         } else {
           printf("Error %d opening lide.device", error);

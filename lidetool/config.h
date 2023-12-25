@@ -19,8 +19,11 @@
 #define CONFIG_H
 
 struct Config {
-  int Unit;
-  int Mode;
+  int  Unit;
+  int  Mode;
+  bool SetMode;
+  int  PIO;
+  bool SetPIO;
 };
 
 struct Config* configure(int, char* []);

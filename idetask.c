@@ -443,7 +443,8 @@ static BYTE init_units(struct IDETask *itask) {
             unit->multipleCount     = 0;
             unit->shadowDevHead     = &itask->shadowDevHead;
             *unit->shadowDevHead    = 0;
-
+            unit->board_set_pio     = NULL;
+    
             // This controls which transfer routine is selected for the device by ata_init_unit
             //
             // See ata_init_unit and device.h for more info
@@ -475,6 +476,26 @@ static BYTE init_units(struct IDETask *itask) {
             }
         }
     }
+
+    struct IDEUnit *unit;
+
+    // Set the PIO config now
+    // This is done late because we might need to know the max PIO of all drives on a channel
+    if (SysBase->SoftVer >= 36) {
+        ObtainSemaphoreShared(&dev->ulSem);
+    } else {
+        ObtainSemaphore(&dev->ulSem);
+    }    
+
+    for (unit = (struct IDEUnit *)itask->dev->units.mlh_Head;
+         unit->mn_Node.mln_Succ != NULL;
+         unit = (struct IDEUnit *)unit->mn_Node.mln_Succ);
+    {
+        if (unit->itask == itask && unit->present)
+            ata_set_pio_mode(unit,unit->pio_max);
+    }
+
+    ReleaseSemaphore(&dev->ulSem);
 
     return num_units;
 }
@@ -684,6 +705,14 @@ transfer:
                         error = 0;
                     } else {
                         error = IOERR_ABORTED;
+                    }
+                    break;
+
+                case CMD_SET_PIOMODE:
+                    if (ioreq->io_Length < 5) {
+                        error = ata_set_pio_mode(unit,ioreq->io_Length);
+                    } else {
+                        error = IOERR_BADLENGTH;
                     }
                     break;
 

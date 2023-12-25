@@ -51,6 +51,7 @@ struct IDEUnit {
     void  (*write_fast)(void *, void *);
     void  (*read_unaligned)(void *, void *);
     void  (*write_unaligned)(void *, void *);
+    void  (*board_set_pio)(struct IDEUnit *);
     volatile UBYTE *shadowDevHead;
     volatile void  *changeInt;
     UBYTE unitNum;
@@ -75,6 +76,8 @@ struct IDEUnit {
     ULONG logicalSectors;
     struct MinList changeInts;
     UBYTE multipleCount;
+    UBYTE pio_max;
+    UBYTE pio_mode;
 };
 
 struct DeviceBase {

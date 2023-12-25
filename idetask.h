@@ -9,8 +9,9 @@
 
 #define CHANGEINT_INTERVAL 2 // Poll units every x seconds for disk change
 
-#define CMD_DIE  0x1000
-#define CMD_XFER (CMD_DIE + 1)
+#define CMD_DIE         0x1000
+#define CMD_XFER        (CMD_DIE + 1)
+#define CMD_SET_PIOMODE (CMD_XFER + 1)
 
 void ide_task();
 void diskchange_task();

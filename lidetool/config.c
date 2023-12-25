@@ -39,8 +39,11 @@ struct Config* configure(int argc, char *argv[]) {
   
   if (config == NULL) return NULL;
 
-  config->Unit = -1;
-  config->Mode = -1;
+  config->Unit    = -1;
+  config->Mode    = -1;
+  config->PIO     = 0;
+  config->SetMode = false;
+  config->SetPIO  = false;
 
   for (int i=1; i<argc; i++) {
     if (argv[i][0] == '-') {
@@ -48,10 +51,18 @@ struct Config* configure(int argc, char *argv[]) {
         case 'm':
           if (i+1 < argc) {
             config->Mode = (*argv[i+1])-'0';
+            config->SetMode = true;
             i++;
           }
           break;
 
+        case 'p':
+          if (i+1 < argc) {
+            config->PIO = (*argv[i+1])-'0';
+            config->SetPIO = true;
+            i++;
+          }
+          break;
         case 'u':
           if (i+1 < argc) {
             config->Unit = (*argv[i+1])-'0';
@@ -63,7 +74,7 @@ struct Config* configure(int argc, char *argv[]) {
     }
   }
 
-  if (config->Unit == -1 || config->Mode == -1) {
+  if (config->Unit == -1 || (config->SetMode == false && config->SetPIO == false)) {
       error = true;
   }
 
@@ -79,5 +90,5 @@ struct Config* configure(int argc, char *argv[]) {
  * @brief Print the usage information
 */
 void usage() {
-    printf("\nUsage: lidetool -u <unit> -m <method>\n\n");
+    printf("\nUsage: lidetool -u <unit> -m <method> -p <pio mode>\n\n");
 }
